@@ -179,21 +179,28 @@ function DateFlowchartTimeline() {
 
   const handleCanvasPointerDown = (evt) => {
     if (evt.button !== 0 || !scrollRef.current) return;
-    evt.preventDefault();
-    evt.currentTarget.setPointerCapture(evt.pointerId); // 포인터가 svg 밖으로 나가도 계속 추적
-    dragState.current = { dragging: true, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: scrollRef.current.scrollTop, moved: false };
-    if (svgRef.current) svgRef.current.style.cursor = "grabbing";
+    // 캡처는 아직 잡지 않는다 — 여기서 잡아버리면 이후 클릭 이벤트가 전부
+    // svg로만 전달돼서 노드 클릭(수정)이 막혀버림. 실제 드래그가 감지된 뒤에만 잡는다.
+    dragState.current = { dragging: true, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: scrollRef.current.scrollTop, moved: false };
   };
-  const handleCanvasPointerUp = (evt) => {
+  const handleCanvasPointerUp = () => {
+    if (dragState.current.moved && svgRef.current && dragState.current.pointerId != null) {
+      try { svgRef.current.releasePointerCapture(dragState.current.pointerId); } catch (e) {}
+    }
     dragState.current.dragging = false;
     if (svgRef.current) svgRef.current.style.cursor = "grab";
-    try { evt.currentTarget.releasePointerCapture(evt.pointerId); } catch (e) {}
   };
   const handleCanvasPointerMove = (evt) => {
     const ds = dragState.current;
     if (ds.dragging) {
       const dx = evt.clientX - ds.startX, dy = evt.clientY - ds.startY;
-      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) ds.moved = true;
+      if (!ds.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        ds.moved = true;
+        if (svgRef.current) {
+          try { svgRef.current.setPointerCapture(ds.pointerId); } catch (e) {} // 진짜 드래그로 확정된 순간에만 캡처
+          svgRef.current.style.cursor = "grabbing";
+        }
+      }
       if (ds.moved && scrollRef.current) {
         scrollRef.current.scrollLeft = ds.startLeft - dx;
         scrollRef.current.scrollTop = ds.startTop - dy;
@@ -231,11 +238,13 @@ function DateFlowchartTimeline() {
     visibleLaneNames.forEach((laneName, laneIdx) => {
       const laneNodes = vNodes
         .filter((n) => n.lane === laneName)
-        .map((n) => ({
-          n,
-          x: xOf(n.start),
-          w: Math.max((diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18, zoom.pxPerDay >= 20 ? 46 : 14),
-        }))
+        .map((n) => {
+          const dateText = n.start + (n.end !== n.start ? ` ~ ${n.end}` : "");
+          const estTextW = Math.max(n.label.length * 6.6, dateText.length * 5.6) + 18;
+          const dayBasedW = (diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18;
+          const minW = zoom.pxPerDay >= 20 ? Math.max(46, estTextW) : 14;
+          return { n, x: xOf(n.start), w: Math.max(dayBasedW, minW) };
+        })
         .sort((a, b) => a.x - b.x); // 날짜순, 같은 날짜면 원래 입력 순서 유지(stable sort)
       let runningRight = -Infinity;
       const y = HEADER_HEIGHT + laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2;
@@ -502,7 +511,8 @@ function DateFlowchartTimeline() {
               const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
               return (
                 <g key={e.id}>
-                  <path d={path} fill="none" stroke="#5eead4" strokeWidth={1.4} markerEnd="url(#arrow)" opacity={0.85} />
+                  <path d={path} fill="none" stroke="#0a0c10" strokeWidth={4.5} opacity={0.9} />
+                  <path d={path} fill="none" stroke="#5eead4" strokeWidth={1.6} markerEnd="url(#arrow)" opacity={0.95} />
                   {e.label && (<g><rect x={mx - e.label.length * 3.4 - 4} y={my - 17} width={e.label.length * 6.8 + 8} height={15} rx={3} fill="#0f1117" stroke="#27303f" /><text x={mx} y={my - 6} fontSize={10} fill="#5eead4" textAnchor="middle">{e.label}</text></g>)}
                 </g>
               );
@@ -514,13 +524,22 @@ function DateFlowchartTimeline() {
               if (n.type === "gate") {
                 const size = 40, cx = p.x, cy = p.y;
                 const pts = `${cx},${cy - size / 2} ${cx + size / 2},${cy} ${cx},${cy + size / 2} ${cx - size / 2},${cy}`;
-                return (<g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}><polygon points={pts} fill="#1e293b" stroke="#5eead4" strokeWidth={1.4} /><text x={cx} y={cy + 4} fontSize={10.5} fill="#e2e8f0" textAnchor="middle">{n.label}</text></g>);
+                const clipId = "clip-" + n.id;
+                return (
+                  <g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}>
+                    <clipPath id={clipId}><rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} /></clipPath>
+                    <polygon points={pts} fill="#1e293b" stroke="#5eead4" strokeWidth={1.4} />
+                    <text x={cx} y={cy + 4} fontSize={10.5} fill="#e2e8f0" textAnchor="middle" clipPath={`url(#${clipId})`}>{n.label}</text>
+                  </g>
+                );
               }
+              const clipId = "clip-" + n.id;
               return (
                 <g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}>
+                  <clipPath id={clipId}><rect x={p.x} y={p.y - 18} width={p.w} height={36} rx={7} /></clipPath>
                   <rect x={p.x} y={p.y - 18} width={p.w} height={36} rx={7} fill={st.fill} stroke={st.stroke} strokeWidth={1.3} />
-                  <text x={p.x + p.w / 2} y={p.y - 2} fontSize={11} fontWeight={600} fill={st.text} textAnchor="middle">{n.label}</text>
-                  <text x={p.x + p.w / 2} y={p.y + 12} fontSize={9} fill={st.text} textAnchor="middle" opacity={0.75}>{n.start}{n.end !== n.start ? ` ~ ${n.end}` : ""}</text>
+                  <text x={p.x + p.w / 2} y={p.y - 2} fontSize={11} fontWeight={600} fill={st.text} textAnchor="middle" clipPath={`url(#${clipId})`}>{n.label}</text>
+                  <text x={p.x + p.w / 2} y={p.y + 12} fontSize={9} fill={st.text} textAnchor="middle" opacity={0.75} clipPath={`url(#${clipId})`}>{n.start}{n.end !== n.start ? ` ~ ${n.end}` : ""}</text>
                 </g>
               );
             })}

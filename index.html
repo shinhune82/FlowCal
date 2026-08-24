@@ -177,17 +177,19 @@ function DateFlowchartTimeline() {
     return { laneIdx, lane: lane.name, date, cellX: dayOffset * zoom.pxPerDay };
   };
 
-  const handleCanvasMouseDown = (evt) => {
+  const handleCanvasPointerDown = (evt) => {
     if (evt.button !== 0 || !scrollRef.current) return;
     evt.preventDefault();
+    evt.currentTarget.setPointerCapture(evt.pointerId); // 포인터가 svg 밖으로 나가도 계속 추적
     dragState.current = { dragging: true, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: scrollRef.current.scrollTop, moved: false };
     if (svgRef.current) svgRef.current.style.cursor = "grabbing";
   };
-  const handleCanvasMouseUp = () => {
+  const handleCanvasPointerUp = (evt) => {
     dragState.current.dragging = false;
     if (svgRef.current) svgRef.current.style.cursor = "grab";
+    try { evt.currentTarget.releasePointerCapture(evt.pointerId); } catch (e) {}
   };
-  const handleCanvasMouseMove = (evt) => {
+  const handleCanvasPointerMove = (evt) => {
     const ds = dragState.current;
     if (ds.dragging) {
       const dx = evt.clientX - ds.startX, dy = evt.clientY - ds.startY;
@@ -225,13 +227,23 @@ function DateFlowchartTimeline() {
 
   const nodePos = useMemo(() => {
     const map = {};
-    vNodes.forEach((n) => {
-      const laneIdx = visibleLaneNames.indexOf(n.lane);
-      if (laneIdx === -1) return;
-      const x = xOf(n.start);
-      const w = Math.max((diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18, zoom.pxPerDay >= 20 ? 46 : 14);
+    const GAP = 14;
+    visibleLaneNames.forEach((laneName, laneIdx) => {
+      const laneNodes = vNodes
+        .filter((n) => n.lane === laneName)
+        .map((n) => ({
+          n,
+          x: xOf(n.start),
+          w: Math.max((diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18, zoom.pxPerDay >= 20 ? 46 : 14),
+        }))
+        .sort((a, b) => a.x - b.x); // 날짜순, 같은 날짜면 원래 입력 순서 유지(stable sort)
+      let runningRight = -Infinity;
       const y = HEADER_HEIGHT + laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2;
-      map[n.id] = { x, w, y, laneIdx };
+      laneNodes.forEach(({ n, x, w }) => {
+        const renderX = Math.max(x, runningRight + GAP); // 겹치면 이전 노드 오른쪽으로 밀기
+        runningRight = renderX + w;
+        map[n.id] = { x: renderX, w, y, laneIdx };
+      });
     });
     return map;
   }, [vNodes, visibleLaneNames.join(","), zoomKey, domainStart]);
@@ -451,9 +463,9 @@ function DateFlowchartTimeline() {
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-auto">
-          <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "grab", userSelect: "none" }}
-            onClick={handleCanvasClick} onMouseDown={handleCanvasMouseDown} onMouseUp={handleCanvasMouseUp}
-            onMouseMove={handleCanvasMouseMove} onMouseLeave={() => { setHover(null); handleCanvasMouseUp(); }}>
+          <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "grab", userSelect: "none", touchAction: "none" }}
+            onClick={handleCanvasClick} onPointerDown={handleCanvasPointerDown} onPointerUp={handleCanvasPointerUp}
+            onPointerMove={handleCanvasPointerMove} onPointerLeave={() => { if (!dragState.current.dragging) setHover(null); }}>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="#5eead4" />

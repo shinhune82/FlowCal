@@ -239,10 +239,8 @@ function DateFlowchartTimeline() {
       const laneNodes = vNodes
         .filter((n) => n.lane === laneName)
         .map((n) => {
-          const dateText = n.start + (n.end !== n.start ? ` ~ ${n.end}` : "");
-          const estTextW = Math.max(n.label.length * 6.6, dateText.length * 5.6) + 18;
           const dayBasedW = (diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18;
-          const minW = zoom.pxPerDay >= 20 ? Math.max(46, estTextW) : 14;
+          const minW = zoom.pxPerDay >= 20 ? 46 : 14;
           return { n, x: xOf(n.start), w: Math.max(dayBasedW, minW) };
         })
         .sort((a, b) => a.x - b.x); // 날짜순, 같은 날짜면 원래 입력 순서 유지(stable sort)
@@ -499,8 +497,14 @@ function DateFlowchartTimeline() {
             <line x1={0} y1={HEADER_HEIGHT} x2={totalWidth} y2={HEADER_HEIGHT} stroke="#2a3241" strokeWidth={1} />
             {(() => {
               const tx = xOf(T);
-              if (tx < 0 || tx > totalWidth) return null;
-              return (<g><line x1={tx} y1={HEADER_HEIGHT} x2={tx} y2={chartHeight} stroke="#f472b6" strokeWidth={1.5} strokeDasharray="4 3" /><text x={tx + 4} y={HEADER_HEIGHT + 14} fontSize={10} fill="#f472b6" fontFamily="ui-monospace, monospace">오늘</text></g>);
+              if (tx < -zoom.pxPerDay || tx > totalWidth) return null;
+              return (
+                <g pointerEvents="none">
+                  <rect x={tx} y={HEADER_HEIGHT} width={zoom.pxPerDay} height={chartHeight - HEADER_HEIGHT} fill="#f472b6" opacity={0.1} />
+                  <rect x={tx} y={HEADER_HEIGHT} width={zoom.pxPerDay} height={3} fill="#f472b6" />
+                  <text x={tx + zoom.pxPerDay / 2} y={HEADER_HEIGHT + 14} fontSize={10} fill="#f472b6" fontFamily="ui-monospace, monospace" textAnchor="middle">오늘</text>
+                </g>
+              );
             })()}
             {vEdges.map((e) => {
               const a = nodePos[e.from], b = nodePos[e.to];

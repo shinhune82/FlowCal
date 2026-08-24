@@ -271,8 +271,26 @@ function DateFlowchartTimeline() {
     commit({ lanes: arr });
   };
   const toggleLane = (name) => commit({ lanes: lanes.map((l) => (l.name === name ? { ...l, visible: !l.visible } : l)) });
-  const isolateLane = (name) => commit({ lanes: lanes.map((l) => ({ ...l, visible: l.name === name })) });
+  const isolateLane = (name) => {
+    const alreadyIsolated = lanes.every((l) => l.visible === (l.name === name));
+    if (alreadyIsolated) commit({ lanes: lanes.map((l) => ({ ...l, visible: true })) });
+    else commit({ lanes: lanes.map((l) => ({ ...l, visible: l.name === name })) });
+  };
   const showAllLanes = () => commit({ lanes: lanes.map((l) => ({ ...l, visible: true })) });
+
+  const [editingLane, setEditingLane] = useState(null);
+  const [editingValue, setEditingValue] = useState("");
+  const startRenameLane = (name) => { setEditingLane(name); setEditingValue(name); };
+  const commitRenameLane = () => {
+    const oldName = editingLane;
+    const val = editingValue.trim();
+    if (!val || val === oldName) { setEditingLane(null); return; }
+    if (lanes.some((l) => l.name === val)) { alert("이미 있는 레인 이름입니다."); return; }
+    const nextLanes = lanes.map((l) => (l.name === oldName ? { ...l, name: val } : l));
+    const nextNodes = nodes.map((n) => (n.lane === oldName ? { ...n, lane: val } : n));
+    commit({ lanes: nextLanes, nodes: nextNodes });
+    setEditingLane(null);
+  };
 
   const exportData = () => {
     const blob = new Blob([JSON.stringify({ lanes, nodes, edges }, null, 2)], { type: "application/json" });
@@ -376,11 +394,26 @@ function DateFlowchartTimeline() {
           {lanes.map((lane, i) => (
             <div key={lane.name} style={{ minHeight: LANE_HEIGHT }} className={"border-b border-zinc-900 px-3 flex flex-col justify-center gap-1.5 " + (lane.visible ? "" : "opacity-40")}>
               <div className="flex items-start justify-between gap-1">
-                <span className="text-sm font-medium text-zinc-200 leading-tight">{lane.name}</span>
+                {editingLane === lane.name ? (
+                  <input
+                    autoFocus
+                    value={editingValue}
+                    onChange={(e) => setEditingValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitRenameLane(); if (e.key === "Escape") setEditingLane(null); }}
+                    onBlur={commitRenameLane}
+                    className="flex-1 min-w-0 bg-zinc-800 border border-teal-500 rounded px-1.5 py-0.5 text-sm text-zinc-100"
+                  />
+                ) : (
+                  <span onClick={() => startRenameLane(lane.name)} title="클릭해서 이름 수정" className="text-sm font-medium text-zinc-200 leading-tight cursor-text hover:text-teal-300">
+                    {lane.name} <span className="text-zinc-600 text-[10px]">✎</span>
+                  </span>
+                )}
                 <button onClick={() => toggleLane(lane.name)} title="켜기/끄기" className="text-base leading-none flex-shrink-0">{lane.visible ? "👁" : "🚫"}</button>
               </div>
               <div className="flex gap-2 items-center">
-                <button onClick={() => isolateLane(lane.name)} className="text-[10px] text-teal-400 hover:text-teal-300 border border-zinc-700 rounded px-1.5 py-0.5">단독보기</button>
+                <button onClick={() => isolateLane(lane.name)} className="text-[10px] text-teal-400 hover:text-teal-300 border border-zinc-700 rounded px-1.5 py-0.5">
+                  {lanes.every((l) => l.visible === (l.name === lane.name)) ? "전체보기" : "단독보기"}
+                </button>
                 <button onClick={() => moveLane(i, -1)} className="text-zinc-500 hover:text-teal-400 text-xs">▲</button>
                 <button onClick={() => moveLane(i, 1)} className="text-zinc-500 hover:text-teal-400 text-xs">▼</button>
                 <button onClick={() => removeLane(lane.name)} className="text-zinc-500 hover:text-rose-400 text-xs">삭제</button>

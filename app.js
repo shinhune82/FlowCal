@@ -20,6 +20,14 @@ const STATUS_STYLES = {
 };
 const STATUS_LABEL = { done: "완료", progress: "진행중", pending: "대기" };
 
+// 작업/단계에서 Bio/Kit/HPLC-MS 파트별 구분 색상 (상태색과 별개로, 카테고리를 지정하면 이 색이 박스 색이 됨)
+const CATEGORY_STYLES = {
+  bio: { fill: "#4ade80", stroke: "#15803d", text: "#052e12" },
+  kit: { fill: "#c084fc", stroke: "#7e22ce", text: "#2e1065" },
+  hplc: { fill: "#60a5fa", stroke: "#1d4ed8", text: "#0b1d3a" },
+};
+const CATEGORY_LABEL = { bio: "Bio", kit: "Kit", hplc: "HPLC-MS" };
+
 // ---------- 유틸 ----------
 const uid = (p = "n") => p + "_" + Math.random().toString(36).slice(2, 9);
 const toDate = (s) => new Date(s + "T00:00:00");
@@ -28,6 +36,12 @@ const pad2 = (n) => String(n).padStart(2, "0");
 const toLocalDateStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; // toISOString은 UTC라 한국시간(UTC+9)에서 하루씩 밀림 — 로컬 기준으로 직접 변환
 const addDays = (s, n) => { const dt = toDate(s); dt.setDate(dt.getDate() + n); return toLocalDateStr(dt); };
 const todayStr = () => toLocalDateStr(new Date());
+// 글자 수 대비 박스 폭이 부족하면 폰트 크기를 자동으로 줄여서 잘리는 걸 최소화
+const fitFontSize = (label, maxWidth, baseFontSize = 11, minFontSize = 7) => {
+  const estWidth = label.length * baseFontSize * 0.62;
+  if (estWidth <= maxWidth) return baseFontSize;
+  return Math.max(minFontSize, baseFontSize * (maxWidth / estWidth));
+};
 
 // ---------- 초기 데이터 ----------
 const T = todayStr();
@@ -52,7 +66,7 @@ const initialEdges = [
 ];
 
 const emptyForm = (defaultLane) => ({
-  id: null, lane: defaultLane, label: "", start: T, end: T, type: "task", status: "pending", links: [], forwardLinks: [],
+  id: null, lane: defaultLane, label: "", start: T, end: T, type: "task", status: "pending", category: "", half: "full", links: [], forwardLinks: [],
 });
 
 // ---------- Firebase (실시간 공유 저장소) ----------
@@ -155,7 +169,9 @@ function DateFlowchartTimeline() {
     if (!laneEntry) return null;
     const dayOffset = Math.floor(x / zoom.pxPerDay);
     const date = addDays(domainStart, dayOffset);
-    return { lane: laneEntry.name, date, cellX: dayOffset * zoom.pxPerDay, laneTop: laneEntry.top, laneHeight: laneEntry.height };
+    const withinDay = x - dayOffset * zoom.pxPerDay;
+    const half = withinDay < zoom.pxPerDay / 2 ? "am" : "pm"; // 클릭한 위치가 그 날의 왼쪽 절반이면 오전, 오른쪽이면 오후
+    return { lane: laneEntry.name, date, half, cellX: dayOffset * zoom.pxPerDay, laneTop: laneEntry.top, laneHeight: laneEntry.height };
   };
 
   const handleCanvasPointerDown = (evt) => {
@@ -196,7 +212,7 @@ function DateFlowchartTimeline() {
     if (dragState.current.moved) { dragState.current.moved = false; return; }
     const hit = posToDateLane(evt);
     if (!hit) return;
-    setForm({ ...emptyForm(hit.lane), lane: hit.lane, start: hit.date, end: hit.date });
+    setForm({ ...emptyForm(hit.lane), lane: hit.lane, start: hit.date, end: hit.date, half: zoomKey === "day" ? hit.half : "full" });
   };
 
   const totalWidth = Math.max(totalDays * zoom.pxPerDay, 600);
@@ -221,6 +237,14 @@ function DateFlowchartTimeline() {
       const items = vNodes
         .filter((n) => n.lane === lane.name)
         .map((n) => {
+          const isSingleDay = n.start === n.end;
+          const isHalf = zoomKey === "day" && isSingleDay && (n.half === "am" || n.half === "pm");
+          if (isHalf) {
+            const halfW = zoom.pxPerDay / 2;
+            const x = xOf(n.start) + (n.half === "pm" ? halfW : 0);
+            const w = Math.max(halfW - 10, 30);
+            return { n, x, w };
+          }
           const dayBasedW = (diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18;
           const minW = zoom.pxPerDay >= 20 ? 46 : 14;
           return { n, x: xOf(n.start), w: Math.max(dayBasedW, minW) };
@@ -249,7 +273,13 @@ function DateFlowchartTimeline() {
     laneLayout.lanes.forEach((lane) => {
       lane.items.forEach(({ n, x, w, row }) => {
         const y = lane.top + row * ROW_HEIGHT + ROW_HEIGHT / 2;
-        map[n.id] = { x, w, y };
+        if (n.type === "gate") {
+          const size = Math.min(40, Math.max(28, w * 0.7));
+          const cx = x + w / 2;
+          map[n.id] = { x, w, y, left: cx - size / 2, right: cx + size / 2, cx, size };
+        } else {
+          map[n.id] = { x, w, y, left: x, right: x + w };
+        }
       });
     });
     return map;
@@ -259,14 +289,17 @@ function DateFlowchartTimeline() {
   const openEdit = (n) => {
     const links = edges.filter((e) => e.to === n.id).map((e) => ({ parentId: e.from, label: e.label, edgeId: e.id }));
     const forwardLinks = edges.filter((e) => e.from === n.id).map((e) => ({ childId: e.to, label: e.label, edgeId: e.id }));
-    setForm({ ...n, links, forwardLinks });
+    setForm({ ...n, half: n.half || "full", category: n.category || "", links, forwardLinks });
   };
   const closeForm = () => setForm(null);
 
   const saveForm = () => {
     if (!form.label.trim()) return;
     const id = form.id || uid();
-    const nodeData = { id, lane: form.lane, label: form.label, start: form.start, end: form.end < form.start ? form.start : form.end, type: form.type, status: form.type === "gate" ? "pending" : form.status };
+    const end = form.end < form.start ? form.start : form.end;
+    const half = form.start === end ? (form.half || "full") : "full"; // 하루짜리 일정에만 오전/오후 의미가 있음
+    const category = form.type === "task" ? (form.category || "") : "";
+    const nodeData = { id, lane: form.lane, label: form.label, start: form.start, end, type: form.type, status: form.type === "gate" ? "pending" : form.status, category, half };
     const exists = nodes.some((n) => n.id === id);
     const nextNodes = exists ? nodes.map((n) => (n.id === id ? nodeData : n)) : [...nodes, nodeData];
     const others = edges.filter((e) => e.to !== id && e.from !== id);
@@ -496,6 +529,7 @@ function DateFlowchartTimeline() {
             {ticks.map((t, i) => (
               <g key={i}>
                 <line x1={t.x} y1={0} x2={t.x} y2={chartHeight} stroke="#1f2733" strokeWidth={1} />
+                {zoomKey === "day" && <line x1={t.x + zoom.pxPerDay / 2} y1={HEADER_HEIGHT} x2={t.x + zoom.pxPerDay / 2} y2={chartHeight} stroke="#1f2733" strokeWidth={1} strokeDasharray="2 3" opacity={0.6} />}
                 <text x={t.x + 4} y={20} fontSize={10} fill="#8b96a8" fontFamily="ui-monospace, monospace">{t.label}</text>
               </g>
             ))}
@@ -517,13 +551,13 @@ function DateFlowchartTimeline() {
               const forward = b.x >= a.x; // 목적지가 오른쪽(또는 같은 위치)이면 정방향 흐름
               let path, mx, my;
               if (forward) {
-                const x1 = a.x + a.w, y1 = a.y, x2 = b.x, y2 = b.y;
+                const x1 = a.right, y1 = a.y, x2 = b.left, y2 = b.y;
                 const dx = Math.min(24, Math.max(6, (x2 - x1) / 2));
                 path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2 - 10},${y2}`;
                 mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
               } else {
                 // 되돌아가는(역방향) 연결: 아래로 살짝 루프를 그려서 정방향 화살표와 겹치지 않게 분리
-                const x1 = a.x, y1 = a.y, x2 = b.x + b.w, y2 = b.y;
+                const x1 = a.left, y1 = a.y, x2 = b.right, y2 = b.y;
                 const loop = 26;
                 path = `M ${x1},${y1} C ${x1 - loop},${y1 + loop} ${x2 + loop},${y2 + loop} ${x2 + 10},${y2}`;
                 mx = (x1 + x2) / 2; my = Math.max(y1, y2) + loop * 0.7;
@@ -540,26 +574,35 @@ function DateFlowchartTimeline() {
             {vNodes.map((n) => {
               const p = nodePos[n.id];
               if (!p) return null;
-              const st = STATUS_STYLES[n.status] || STATUS_STYLES.pending;
+              const st = (n.category && CATEGORY_STYLES[n.category]) || STATUS_STYLES[n.status] || STATUS_STYLES.pending;
+              const fullTitle = `${n.label}${n.category ? " · " + CATEGORY_LABEL[n.category] : ""} (${n.start}${n.end !== n.start ? " ~ " + n.end : n.half === "am" ? " 오전" : n.half === "pm" ? " 오후" : ""})`;
               if (n.type === "gate") {
-                const size = 40, cx = p.x, cy = p.y;
+                const size = Math.min(40, Math.max(28, p.w * 0.7)); // 슬롯이 좁으면(오전/오후 등) 다이아몬드도 같이 줄임
+                const cx = p.x + p.w / 2, cy = p.y; // 슬롯 왼쪽 경계가 아니라 가운데에 오도록
                 const pts = `${cx},${cy - size / 2} ${cx + size / 2},${cy} ${cx},${cy + size / 2} ${cx - size / 2},${cy}`;
                 const clipId = "clip-" + n.id;
+                const gateFont = fitFontSize(n.label, size * 0.78, 10.5, 7);
                 return (
                   <g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}>
+                    <title>{fullTitle}</title>
                     <clipPath id={clipId}><rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} /></clipPath>
                     <polygon points={pts} fill="#1e293b" stroke="#5eead4" strokeWidth={1.4} />
-                    <text x={cx} y={cy + 4} fontSize={10.5} fill="#e2e8f0" textAnchor="middle" clipPath={`url(#${clipId})`}>{n.label}</text>
+                    <text x={cx} y={cy + gateFont * 0.35} fontSize={gateFont} fill="#e2e8f0" textAnchor="middle" clipPath={`url(#${clipId})`}>{n.label}</text>
                   </g>
                 );
               }
               const clipId = "clip-" + n.id;
+              const titleFont = fitFontSize(n.label, p.w - 10, 11, 7);
               return (
                 <g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}>
+                  <title>{fullTitle}</title>
                   <clipPath id={clipId}><rect x={p.x} y={p.y - 18} width={p.w} height={36} rx={7} /></clipPath>
                   <rect x={p.x} y={p.y - 18} width={p.w} height={36} rx={7} fill={st.fill} stroke={st.stroke} strokeWidth={1.3} />
-                  <text x={p.x + p.w / 2} y={p.y - 2} fontSize={11} fontWeight={600} fill={st.text} textAnchor="middle" clipPath={`url(#${clipId})`}>{n.label}</text>
-                  <text x={p.x + p.w / 2} y={p.y + 12} fontSize={9} fill={st.text} textAnchor="middle" opacity={0.75} clipPath={`url(#${clipId})`}>{n.start}{n.end !== n.start ? ` ~ ${n.end}` : ""}</text>
+                  <text x={p.x + p.w / 2} y={p.y - 2} fontSize={titleFont} fontWeight={600} fill={st.text} textAnchor="middle" clipPath={`url(#${clipId})`}>{n.label}</text>
+                  <text x={p.x + p.w / 2} y={p.y + 12} fontSize={9} fill={st.text} textAnchor="middle" opacity={0.75} clipPath={`url(#${clipId})`}>{n.start}{n.end !== n.start ? ` ~ ${n.end}` : n.half === "am" ? " 오전" : n.half === "pm" ? " 오후" : ""}</text>
+                  {n.category && (
+                    <circle cx={p.x + p.w - 8} cy={p.y - 12} r={4} fill={STATUS_STYLES[n.status]?.fill || "#475569"} stroke="#0a0c10" strokeWidth={1} />
+                  )}
                 </g>
               );
             })}
@@ -584,6 +627,16 @@ function DateFlowchartTimeline() {
               <div className="flex-1"><label className="block text-xs text-zinc-400 mb-1">시작일</label><input type="date" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm" /></div>
               <div className="flex-1"><label className="block text-xs text-zinc-400 mb-1">종료일</label><input type="date" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm" /></div>
             </div>
+            {form.start === form.end && (
+              <div className="mb-3">
+                <label className="block text-xs text-zinc-400 mb-1">시간대</label>
+                <select value={form.half || "full"} onChange={(e) => setForm({ ...form, half: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm">
+                  <option value="full">종일</option>
+                  <option value="am">오전</option>
+                  <option value="pm">오후</option>
+                </select>
+              </div>
+            )}
             <div className="flex gap-2 mb-3">
               <div className="flex-1"><label className="block text-xs text-zinc-400 mb-1">유형</label>
                 <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm">
@@ -598,6 +651,15 @@ function DateFlowchartTimeline() {
                 </div>
               )}
             </div>
+            {form.type === "task" && (
+              <div className="mb-3">
+                <label className="block text-xs text-zinc-400 mb-1">구분 (Bio / Kit / HPLC-MS)</label>
+                <select value={form.category || ""} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm">
+                  <option value="">지정 안 함 (상태색 그대로)</option>
+                  {Object.entries(CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+            )}
             <label className="block text-xs text-zinc-400 mb-1">연결 (이전 노드 → 이 노드)</label>
             <div className="space-y-2 mb-2">
               {form.links.map((l, i) => (

@@ -570,13 +570,13 @@ function DateFlowchartTimeline() {
               if (forward) {
                 const x1 = a.right, y1 = a.y, x2 = b.left, y2 = b.y;
                 const dx = Math.min(24, Math.max(6, (x2 - x1) / 2));
-                path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2 - 10},${y2}`;
+                path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
                 mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
               } else {
                 // 되돌아가는(역방향) 연결: 아래로 살짝 루프를 그려서 정방향 화살표와 겹치지 않게 분리
                 const x1 = a.left, y1 = a.y, x2 = b.right, y2 = b.y;
                 const loop = 26;
-                path = `M ${x1},${y1} C ${x1 - loop},${y1 + loop} ${x2 + loop},${y2 + loop} ${x2 + 10},${y2}`;
+                path = `M ${x1},${y1} C ${x1 - loop},${y1 + loop} ${x2 + loop},${y2 + loop} ${x2},${y2}`;
                 mx = (x1 + x2) / 2; my = Math.max(y1, y2) + loop * 0.7;
               }
               return (

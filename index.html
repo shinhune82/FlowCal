@@ -162,6 +162,7 @@ function DateFlowchartTimeline() {
   };
 
   const [hover, setHover] = useState(null); // {x, laneIdx, date}
+  const dragState = useRef({ dragging: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, moved: false });
 
   const posToDateLane = (evt) => {
     if (!svgRef.current) return null;
@@ -176,11 +177,33 @@ function DateFlowchartTimeline() {
     return { laneIdx, lane: lane.name, date, cellX: dayOffset * zoom.pxPerDay };
   };
 
+  const handleCanvasMouseDown = (evt) => {
+    if (evt.button !== 0 || !scrollRef.current) return;
+    evt.preventDefault();
+    dragState.current = { dragging: true, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: scrollRef.current.scrollTop, moved: false };
+    if (svgRef.current) svgRef.current.style.cursor = "grabbing";
+  };
+  const handleCanvasMouseUp = () => {
+    dragState.current.dragging = false;
+    if (svgRef.current) svgRef.current.style.cursor = "grab";
+  };
   const handleCanvasMouseMove = (evt) => {
+    const ds = dragState.current;
+    if (ds.dragging) {
+      const dx = evt.clientX - ds.startX, dy = evt.clientY - ds.startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) ds.moved = true;
+      if (ds.moved && scrollRef.current) {
+        scrollRef.current.scrollLeft = ds.startLeft - dx;
+        scrollRef.current.scrollTop = ds.startTop - dy;
+        if (hover) setHover(null);
+        return;
+      }
+    }
     const hit = posToDateLane(evt);
     setHover(hit);
   };
   const handleCanvasClick = (evt) => {
+    if (dragState.current.moved) { dragState.current.moved = false; return; }
     const hit = posToDateLane(evt);
     if (!hit) return;
     setForm({ ...emptyForm(hit.lane), lane: hit.lane, start: hit.date, end: hit.date });
@@ -428,8 +451,9 @@ function DateFlowchartTimeline() {
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-auto">
-          <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "crosshair" }}
-            onClick={handleCanvasClick} onMouseMove={handleCanvasMouseMove} onMouseLeave={() => setHover(null)}>
+          <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "grab", userSelect: "none" }}
+            onClick={handleCanvasClick} onMouseDown={handleCanvasMouseDown} onMouseUp={handleCanvasMouseUp}
+            onMouseMove={handleCanvasMouseMove} onMouseLeave={() => { setHover(null); handleCanvasMouseUp(); }}>
             <defs>
               <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="#5eead4" />

@@ -141,12 +141,19 @@ function DateFlowchartTimeline() {
     return { domainStart: ds, domainEnd: de, totalDays: diffDays(ds, de) + 1 };
   }, [vNodes, zoomKey, viewYear]);
 
-  // 연도 이동 버튼을 누르면 해당 연도 1/1 위치로 스크롤 이동
+  // 연도 이동(◀ ▶) 버튼을 눌렀을 때만 그 해 1/1로 스크롤
   useEffect(() => {
     if (!scrollRef.current) return;
     const targetX = diffDays(domainStart, `${viewYear}-01-01`) * zoom.pxPerDay;
     scrollRef.current.scrollLeft = Math.max(0, targetX - 30);
-  }, [viewYear, zoomKey, domainStart]);
+  }, [viewYear]);
+
+  // 줌 레벨을 바꾸거나 처음 열었을 때는 항상 오늘 날짜 기준으로 표시
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const targetX = diffDays(domainStart, T) * zoom.pxPerDay;
+    scrollRef.current.scrollLeft = Math.max(0, targetX - 200);
+  }, [zoomKey]);
 
   const scrollToToday = () => {
     if (!scrollRef.current) return;

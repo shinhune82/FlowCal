@@ -44,8 +44,10 @@ const STATUS_LABEL = { done: "완료", progress: "진행중", pending: "대기" 
 const uid = (p = "n") => p + "_" + Math.random().toString(36).slice(2, 9);
 const toDate = (s) => new Date(s + "T00:00:00");
 const diffDays = (a, b) => Math.round((toDate(b) - toDate(a)) / 86400000);
-const addDays = (s, n) => { const dt = toDate(s); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10); };
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const pad2 = (n) => String(n).padStart(2, "0");
+const toLocalDateStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; // toISOString은 UTC라 한국시간(UTC+9)에서 하루씩 밀림 — 로컬 기준으로 직접 변환
+const addDays = (s, n) => { const dt = toDate(s); dt.setDate(dt.getDate() + n); return toLocalDateStr(dt); };
+const todayStr = () => toLocalDateStr(new Date());
 
 // ---------- 초기 데이터 ----------
 const T = todayStr();
@@ -229,7 +231,7 @@ function DateFlowchartTimeline() {
     else if (zoomKey === "week") { interval = d3.timeMonday; fmt = d3.timeFormat("%m/%d 주"); }
     else if (zoomKey === "month") { interval = d3.timeMonth; fmt = d3.timeFormat("%Y-%m"); }
     else { interval = d3.timeMonth.every(3); fmt = d3.timeFormat("%Y-%m"); }
-    return interval.range(s, e).map((dt) => ({ x: diffDays(domainStart, dt.toISOString().slice(0, 10)) * zoom.pxPerDay, label: fmt(dt) }));
+    return interval.range(s, e).map((dt) => ({ x: diffDays(domainStart, toLocalDateStr(dt)) * zoom.pxPerDay, label: fmt(dt) }));
   }, [domainStart, domainEnd, zoomKey]);
 
   const nodePos = useMemo(() => {

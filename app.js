@@ -569,7 +569,7 @@ function DateFlowchartTimeline() {
 
       {form && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={closeForm}>
-          <div onClick={(e) => e.stopPropagation()} className="bg-zinc-900 border border-zinc-700 rounded-lg w-[420px] max-h-[85vh] overflow-y-auto p-5">
+          <div onClick={(e) => e.stopPropagation()} className="bg-zinc-900 border border-zinc-700 rounded-lg w-[420px] max-w-[92vw] max-h-[85vh] overflow-y-auto overflow-x-hidden p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-teal-400">{form.id ? "노드 편집" : "새 노드"}</h3>
               <button onClick={closeForm} className="text-zinc-500 hover:text-zinc-200">✕</button>
@@ -602,11 +602,11 @@ function DateFlowchartTimeline() {
             <div className="space-y-2 mb-2">
               {form.links.map((l, i) => (
                 <div key={i} className="flex gap-1.5">
-                  <select value={l.parentId} onChange={(e) => updateLink(i, "parentId", e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs">
+                  <select value={l.parentId} onChange={(e) => updateLink(i, "parentId", e.target.value)} className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs">
                     <option value="">선택...</option>
                     {nodes.filter((n) => n.id !== form.id).map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
                   </select>
-                  <input value={l.label} onChange={(e) => updateLink(i, "label", e.target.value)} placeholder="조건 라벨(선택)" className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs" />
+                  <input value={l.label} onChange={(e) => updateLink(i, "label", e.target.value)} placeholder="조건 라벨(선택)" className="w-24 flex-shrink-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs" />
                   <button onClick={() => removeLink(i)} className="text-zinc-500 hover:text-rose-400">✕</button>
                 </div>
               ))}
@@ -617,11 +617,11 @@ function DateFlowchartTimeline() {
             <div className="space-y-2 mb-2">
               {form.forwardLinks.map((l, i) => (
                 <div key={i} className="flex gap-1.5">
-                  <select value={l.childId} onChange={(e) => updateForwardLink(i, "childId", e.target.value)} className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs">
+                  <select value={l.childId} onChange={(e) => updateForwardLink(i, "childId", e.target.value)} className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs">
                     <option value="">선택...</option>
                     {nodes.filter((n) => n.id !== form.id).map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
                   </select>
-                  <input value={l.label} onChange={(e) => updateForwardLink(i, "label", e.target.value)} placeholder="조건 라벨(선택)" className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs" />
+                  <input value={l.label} onChange={(e) => updateForwardLink(i, "label", e.target.value)} placeholder="조건 라벨(선택)" className="w-24 flex-shrink-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs" />
                   <button onClick={() => removeForwardLink(i)} className="text-zinc-500 hover:text-rose-400">✕</button>
                 </div>
               ))}

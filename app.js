@@ -462,6 +462,23 @@ function DateFlowchartTimeline() {
         <button onClick={exportData} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 border border-zinc-700 px-3 py-1.5 rounded-md">⬇ 내보내기</button>
         <button onClick={() => setImportOpen(true)} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 border border-zinc-700 px-3 py-1.5 rounded-md">⬆ 가져오기</button>
       </div>
+      <div className="flex items-center gap-4 px-4 py-1.5 border-b border-zinc-800 bg-zinc-950/60 flex-wrap">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">구분</span>
+        {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
+          <span key={k} className="flex items-center gap-1.5 text-xs text-zinc-300">
+            <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: CATEGORY_STYLES[k].fill, border: `1px solid ${CATEGORY_STYLES[k].stroke}` }} />
+            {label}
+          </span>
+        ))}
+        <span className="w-px h-3 bg-zinc-700 mx-1" />
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">상태 점</span>
+        {Object.entries(STATUS_LABEL).map(([k, label]) => (
+          <span key={k} className="flex items-center gap-1.5 text-xs text-zinc-300">
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_STYLES[k].fill }} />
+            {label}
+          </span>
+        ))}
+      </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <div style={{ width: LABEL_COL_WIDTH }} className="flex-shrink-0 border-r border-zinc-800 bg-zinc-950 overflow-y-auto">
@@ -566,7 +583,7 @@ function DateFlowchartTimeline() {
                 <g key={e.id}>
                   <path d={path} fill="none" stroke="#0a0c10" strokeWidth={6} opacity={0.95} />
                   <path d={path} fill="none" stroke={forward ? "#5eead4" : "#fb7185"} strokeWidth={2.2}
-                    strokeDasharray={forward ? "none" : "5 4"} markerEnd={forward ? "url(#arrow)" : "url(#arrow-back)"} opacity={1} />
+                    strokeDasharray={forward ? "none" : "5 4"} opacity={1} />
                   {e.label && (<g><rect x={mx - e.label.length * 3.4 - 4} y={my - 17} width={e.label.length * 6.8 + 8} height={15} rx={3} fill="#0f1117" stroke="#27303f" /><text x={mx} y={my - 6} fontSize={10} fill={forward ? "#5eead4" : "#fb7185"} textAnchor="middle">{e.label}</text></g>)}
                 </g>
               );

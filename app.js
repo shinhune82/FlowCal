@@ -7,7 +7,7 @@ const HEADER_HEIGHT = 52;
 const LABEL_COL_WIDTH = 190;
 
 const ZOOM_PRESETS = {
-  day: { pxPerDay: 64, label: "일간", pad: 2 },
+  day: { pxPerDay: 92, label: "일간", pad: 2 },
   week: { pxPerDay: 24, label: "주간", pad: 7 },
   month: { pxPerDay: 8, label: "월간", pad: 20 },
   year: { pxPerDay: 1.6, label: "연간", pad: 60 },
@@ -476,10 +476,10 @@ function DateFlowchartTimeline() {
             onClick={handleCanvasClick} onPointerDown={handleCanvasPointerDown} onPointerUp={handleCanvasPointerUp}
             onPointerMove={handleCanvasPointerMove} onPointerLeave={() => { if (!dragState.current.dragging) setHover(null); }}>
             <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9.5" markerHeight="9.5" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="#5eead4" />
               </marker>
-              <marker id="arrow-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <marker id="arrow-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9.5" markerHeight="9.5" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="#fb7185" />
               </marker>
             </defs>
@@ -530,9 +530,9 @@ function DateFlowchartTimeline() {
               }
               return (
                 <g key={e.id}>
-                  <path d={path} fill="none" stroke="#0a0c10" strokeWidth={4.5} opacity={0.9} />
-                  <path d={path} fill="none" stroke={forward ? "#5eead4" : "#fb7185"} strokeWidth={1.6}
-                    strokeDasharray={forward ? "none" : "4 3"} markerEnd={forward ? "url(#arrow)" : "url(#arrow-back)"} opacity={0.95} />
+                  <path d={path} fill="none" stroke="#0a0c10" strokeWidth={6} opacity={0.95} />
+                  <path d={path} fill="none" stroke={forward ? "#5eead4" : "#fb7185"} strokeWidth={2.2}
+                    strokeDasharray={forward ? "none" : "5 4"} markerEnd={forward ? "url(#arrow)" : "url(#arrow-back)"} opacity={1} />
                   {e.label && (<g><rect x={mx - e.label.length * 3.4 - 4} y={my - 17} width={e.label.length * 6.8 + 8} height={15} rx={3} fill="#0f1117" stroke="#27303f" /><text x={mx} y={my - 6} fontSize={10} fill={forward ? "#5eead4" : "#fb7185"} textAnchor="middle">{e.label}</text></g>)}
                 </g>
               );

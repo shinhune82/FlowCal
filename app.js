@@ -94,7 +94,8 @@ function DateFlowchartTimeline() {
   const [importText, setImportText] = useState("");
   const fileInputRef = useRef(null);
   const svgRef = useRef(null);
-  const scrollRef = useRef(null);
+  const scrollRef = useRef(null); // 가로 스크롤(타임라인 영역)
+  const vScrollRef = useRef(null); // 세로 스크롤(레인 라벨 + 타임라인 공용)
   const [syncStatus, setSyncStatus] = useState("connecting"); // connecting | synced | error
 
   // Firestore 실시간 구독: 나 또는 다른 사람이 바꾸면 여기로 즉시 반영됨
@@ -175,10 +176,10 @@ function DateFlowchartTimeline() {
   };
 
   const handleCanvasPointerDown = (evt) => {
-    if (evt.button !== 0 || !scrollRef.current) return;
+    if (evt.button !== 0 || !scrollRef.current || !vScrollRef.current) return;
     // 캡처는 아직 잡지 않는다 — 여기서 잡아버리면 이후 클릭 이벤트가 전부
     // svg로만 전달돼서 노드 클릭(수정)이 막혀버림. 실제 드래그가 감지된 뒤에만 잡는다.
-    dragState.current = { dragging: true, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: scrollRef.current.scrollTop, moved: false };
+    dragState.current = { dragging: true, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: vScrollRef.current.scrollTop, moved: false };
   };
   const handleCanvasPointerUp = () => {
     if (dragState.current.moved && svgRef.current && dragState.current.pointerId != null) {
@@ -198,9 +199,9 @@ function DateFlowchartTimeline() {
           svgRef.current.style.cursor = "grabbing";
         }
       }
-      if (ds.moved && scrollRef.current) {
+      if (ds.moved && scrollRef.current && vScrollRef.current) {
         scrollRef.current.scrollLeft = ds.startLeft - dx;
-        scrollRef.current.scrollTop = ds.startTop - dy;
+        vScrollRef.current.scrollTop = ds.startTop - dy;
         if (hover) setHover(null);
         return;
       }
@@ -276,9 +277,9 @@ function DateFlowchartTimeline() {
         if (n.type === "gate") {
           const size = Math.min(40, Math.max(28, w * 0.7));
           const cx = x + w / 2;
-          map[n.id] = { x, w, y, left: cx - size / 2, right: cx + size / 2, cx, size };
+          map[n.id] = { x, w, y, left: cx - size / 2, right: cx + size / 2, top: y - size / 2, bottom: y + size / 2, cx, size };
         } else {
-          map[n.id] = { x, w, y, left: x, right: x + w };
+          map[n.id] = { x, w, y, left: x, right: x + w, top: y - 18, bottom: y + 18, cx: x + w / 2 };
         }
       });
     });
@@ -480,8 +481,8 @@ function DateFlowchartTimeline() {
         ))}
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div style={{ width: LABEL_COL_WIDTH }} className="flex-shrink-0 border-r border-zinc-800 bg-zinc-950 overflow-y-auto">
+      <div ref={vScrollRef} className="flex flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        <div style={{ width: LABEL_COL_WIDTH }} className="flex-shrink-0 border-r border-zinc-800 bg-zinc-950">
           <div style={{ height: HEADER_HEIGHT }} className="border-b border-zinc-800 flex items-center px-3 text-[11px] text-zinc-500 uppercase tracking-wider">분류 / 레인</div>
           {lanes.map((lane, i) => {
             const laneH = laneLayout.lanes.find((l) => l.name === lane.name)?.height || LANE_HEIGHT;
@@ -521,7 +522,7 @@ function DateFlowchartTimeline() {
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-auto">
+        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-hidden">
           <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "grab", userSelect: "none", touchAction: "none" }}
             onClick={handleCanvasClick} onPointerDown={handleCanvasPointerDown} onPointerUp={handleCanvasPointerUp}
             onPointerMove={handleCanvasPointerMove} onPointerLeave={() => { if (!dragState.current.dragging) setHover(null); }}>
@@ -565,25 +566,34 @@ function DateFlowchartTimeline() {
             {vEdges.map((e) => {
               const a = nodePos[e.from], b = nodePos[e.to];
               if (!a || !b) return null;
-              const forward = b.x >= a.x; // 목적지가 오른쪽(또는 같은 위치)이면 정방향 흐름
+              const ddx = b.cx - a.cx, ddy = b.y - a.y;
+              const horizontal = Math.abs(ddx) >= Math.abs(ddy); // 가로로 더 멀면 좌우면, 세로로 더 멀면 위아래면
+              const forward = ddx >= 0; // 시간상 앞으로 가는지(색/점선 구분용, 연결면 선택과는 별개)
               let path, mx, my;
-              if (forward) {
+              if (horizontal && forward) {
                 const x1 = a.right, y1 = a.y, x2 = b.left, y2 = b.y;
                 const dx = Math.min(24, Math.max(6, (x2 - x1) / 2));
                 path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
                 mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
-              } else {
+              } else if (horizontal && !forward) {
                 // 되돌아가는(역방향) 연결: 아래로 살짝 루프를 그려서 정방향 화살표와 겹치지 않게 분리
                 const x1 = a.left, y1 = a.y, x2 = b.right, y2 = b.y;
                 const loop = 26;
                 path = `M ${x1},${y1} C ${x1 - loop},${y1 + loop} ${x2 + loop},${y2 + loop} ${x2},${y2}`;
                 mx = (x1 + x2) / 2; my = Math.max(y1, y2) + loop * 0.7;
+              } else {
+                // 세로로 더 가까우면 위/아래 면으로 연결
+                const down = ddy >= 0;
+                const x1 = a.cx, y1 = down ? a.bottom : a.top, x2 = b.cx, y2 = down ? b.top : b.bottom;
+                const dy = Math.min(24, Math.max(6, Math.abs(y2 - y1) / 2)) * (down ? 1 : -1);
+                path = `M ${x1},${y1} C ${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`;
+                mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
               }
               return (
                 <g key={e.id}>
                   <path d={path} fill="none" stroke="#0a0c10" strokeWidth={6} opacity={0.95} />
                   <path d={path} fill="none" stroke={forward ? "#5eead4" : "#fb7185"} strokeWidth={2.2}
-                    strokeDasharray={forward ? "none" : "5 4"} opacity={1} />
+                    strokeDasharray={horizontal && !forward ? "5 4" : "none"} opacity={1} />
                   {e.label && (<g><rect x={mx - e.label.length * 3.4 - 4} y={my - 17} width={e.label.length * 6.8 + 8} height={15} rx={3} fill="#0f1117" stroke="#27303f" /><text x={mx} y={my - 6} fontSize={10} fill={forward ? "#5eead4" : "#fb7185"} textAnchor="middle">{e.label}</text></g>)}
                 </g>
               );

@@ -94,8 +94,7 @@ function DateFlowchartTimeline() {
   const [importText, setImportText] = useState("");
   const fileInputRef = useRef(null);
   const svgRef = useRef(null);
-  const scrollRef = useRef(null); // 가로 스크롤(타임라인 영역)
-  const vScrollRef = useRef(null); // 세로 스크롤(레인 라벨 + 타임라인 공용)
+  const scrollRef = useRef(null); // 가로+세로 스크롤(레인 라벨은 sticky로 고정, 타임라인과 스크롤 공유)
   const [syncStatus, setSyncStatus] = useState("connecting"); // connecting | synced | error
 
   // Firestore 실시간 구독: 나 또는 다른 사람이 바꾸면 여기로 즉시 반영됨
@@ -185,10 +184,10 @@ function DateFlowchartTimeline() {
   };
 
   const handleCanvasPointerDown = (evt) => {
-    if (evt.button !== 0 || !scrollRef.current || !vScrollRef.current) return;
+    if (evt.button !== 0 || !scrollRef.current) return;
     // 캡처는 아직 잡지 않는다 — 여기서 잡아버리면 이후 클릭 이벤트가 전부
     // svg로만 전달돼서 노드 클릭(수정)이 막혀버림. 실제 드래그가 감지된 뒤에만 잡는다.
-    dragState.current = { dragging: true, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: vScrollRef.current.scrollTop, moved: false };
+    dragState.current = { dragging: true, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: scrollRef.current.scrollTop, moved: false };
   };
   const handleCanvasPointerUp = (evt) => {
     const nd = nodeDragState.current;
@@ -248,9 +247,9 @@ function DateFlowchartTimeline() {
           svgRef.current.style.cursor = "grabbing";
         }
       }
-      if (ds.moved && scrollRef.current && vScrollRef.current) {
+      if (ds.moved && scrollRef.current) {
         scrollRef.current.scrollLeft = ds.startLeft - dx;
-        vScrollRef.current.scrollTop = ds.startTop - dy;
+        scrollRef.current.scrollTop = ds.startTop - dy;
         if (hover) setHover(null);
         return;
       }
@@ -557,8 +556,8 @@ function DateFlowchartTimeline() {
         ))}
       </div>
 
-      <div ref={vScrollRef} className="flex flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-        <div style={{ width: LABEL_COL_WIDTH }} className="flex-shrink-0 border-r border-zinc-800 bg-zinc-950">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto flex items-start">
+        <div style={{ width: LABEL_COL_WIDTH }} className="sticky left-0 z-10 flex-shrink-0 border-r border-zinc-800 bg-zinc-950">
           <div style={{ height: HEADER_HEIGHT }} className="border-b border-zinc-800 flex items-center px-3 text-[11px] text-zinc-500 uppercase tracking-wider">분류 / 레인</div>
           {lanes.map((lane, i) => {
             const laneH = laneLayout.lanes.find((l) => l.name === lane.name)?.height || LANE_HEIGHT;
@@ -598,7 +597,7 @@ function DateFlowchartTimeline() {
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-visible">
+        <div className="flex-shrink-0">
           <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "grab", userSelect: "none", touchAction: "none" }}
             onClick={handleCanvasClick} onPointerDown={handleCanvasPointerDown} onPointerUp={handleCanvasPointerUp}
             onPointerMove={handleCanvasPointerMove} onPointerLeave={() => { if (!dragState.current.dragging) setHover(null); }}>
@@ -735,7 +734,7 @@ function DateFlowchartTimeline() {
               {lanes.map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
             </select>
             <div className="flex gap-2 mb-3">
-              <div className="flex-1"><label className="block text-xs text-zinc-400 mb-1">시작일</label><input type="date" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm" /></div>
+              <div className="flex-1"><label className="block text-xs text-zinc-400 mb-1">시작일</label><input type="date" value={form.start} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, start: v, end: f.id ? f.end : v })); }} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm" /></div>
               <div className="flex-1"><label className="block text-xs text-zinc-400 mb-1">종료일</label><input type="date" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm" /></div>
             </div>
             {form.start === form.end && (

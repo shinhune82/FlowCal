@@ -160,6 +160,8 @@ function DateFlowchartTimeline() {
 
   const [hover, setHover] = useState(null); // {x, laneIdx, date}
   const dragState = useRef({ dragging: false, startX: 0, startY: 0, startLeft: 0, startTop: 0, moved: false });
+  const nodeDragState = useRef({ dragging: false, nodeId: null, pointerId: null, startX: 0, startY: 0, dx: 0, dy: 0, moved: false, justMoved: false });
+  const [dragPreview, setDragPreview] = useState(null); // {nodeId, dx, dy}
 
   const posToDateLane = (evt) => {
     if (!svgRef.current) return null;
@@ -175,13 +177,48 @@ function DateFlowchartTimeline() {
     return { lane: laneEntry.name, date, half, cellX: dayOffset * zoom.pxPerDay, laneTop: laneEntry.top, laneHeight: laneEntry.height };
   };
 
+  // 기존 노드를 눌러서 드래그로 옮기기 시작
+  const handleNodePointerDown = (evt, n) => {
+    if (evt.button !== 0) return;
+    evt.stopPropagation(); // 캔버스(배경) 드래그로 번지지 않게 막음
+    nodeDragState.current = { dragging: true, nodeId: n.id, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, dx: 0, dy: 0, moved: false, justMoved: false };
+  };
+
   const handleCanvasPointerDown = (evt) => {
     if (evt.button !== 0 || !scrollRef.current || !vScrollRef.current) return;
     // 캡처는 아직 잡지 않는다 — 여기서 잡아버리면 이후 클릭 이벤트가 전부
     // svg로만 전달돼서 노드 클릭(수정)이 막혀버림. 실제 드래그가 감지된 뒤에만 잡는다.
     dragState.current = { dragging: true, pointerId: evt.pointerId, startX: evt.clientX, startY: evt.clientY, startLeft: scrollRef.current.scrollLeft, startTop: vScrollRef.current.scrollTop, moved: false };
   };
-  const handleCanvasPointerUp = () => {
+  const handleCanvasPointerUp = (evt) => {
+    const nd = nodeDragState.current;
+    if (nd.dragging) {
+      if (nd.moved) {
+        const node = nodes.find((x) => x.id === nd.nodeId);
+        if (node) {
+          const dayDelta = Math.round(nd.dx / zoom.pxPerDay);
+          let newLane = node.lane;
+          if (svgRef.current) {
+            const rect = svgRef.current.getBoundingClientRect();
+            const dropY = evt.clientY - rect.top;
+            const laneEntry = laneLayout.lanes.find((l) => dropY >= l.top && dropY < l.top + l.height);
+            if (laneEntry) newLane = laneEntry.name;
+          }
+          if (dayDelta !== 0 || newLane !== node.lane) {
+            const newStart = addDays(node.start, dayDelta);
+            const newEnd = addDays(node.end, dayDelta);
+            const nextNodes = nodes.map((x) => (x.id === node.id ? { ...x, start: newStart, end: newEnd, lane: newLane } : x));
+            commit({ nodes: nextNodes });
+          }
+        }
+        nd.justMoved = true;
+        try { if (nd.pointerId != null && svgRef.current) svgRef.current.releasePointerCapture(nd.pointerId); } catch (e) {}
+      }
+      nodeDragState.current = { ...nd, dragging: false };
+      setDragPreview(null);
+      if (svgRef.current) svgRef.current.style.cursor = "grab";
+      return;
+    }
     if (dragState.current.moved && svgRef.current && dragState.current.pointerId != null) {
       try { svgRef.current.releasePointerCapture(dragState.current.pointerId); } catch (e) {}
     }
@@ -189,6 +226,18 @@ function DateFlowchartTimeline() {
     if (svgRef.current) svgRef.current.style.cursor = "grab";
   };
   const handleCanvasPointerMove = (evt) => {
+    const nd = nodeDragState.current;
+    if (nd.dragging) {
+      const dx = evt.clientX - nd.startX, dy = evt.clientY - nd.startY;
+      if (!nd.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        nd.moved = true;
+        try { if (svgRef.current) svgRef.current.setPointerCapture(nd.pointerId); } catch (e) {}
+        if (svgRef.current) svgRef.current.style.cursor = "grabbing";
+      }
+      nd.dx = dx; nd.dy = dy;
+      if (nd.moved) setDragPreview({ nodeId: nd.nodeId, dx, dy });
+      return;
+    }
     const ds = dragState.current;
     if (ds.dragging) {
       const dx = evt.clientX - ds.startX, dy = evt.clientY - ds.startY;
@@ -211,6 +260,7 @@ function DateFlowchartTimeline() {
   };
   const handleCanvasClick = (evt) => {
     if (dragState.current.moved) { dragState.current.moved = false; return; }
+    if (nodeDragState.current.justMoved) { nodeDragState.current.justMoved = false; return; }
     const hit = posToDateLane(evt);
     if (!hit) return;
     setForm({ ...emptyForm(hit.lane), lane: hit.lane, start: hit.date, end: hit.date, half: zoomKey === "day" ? hit.half : "full" });
@@ -231,6 +281,24 @@ function DateFlowchartTimeline() {
 
   // 레인별 레이아웃: 날짜(x)는 절대 밀지 않고, 같은 날짜에 여러 개가 겹치면
   // 그 레인 안에서 아래쪽 행(row)으로 쌓는다. 레인 높이는 필요한 행 수만큼 늘어남.
+  // 엣지로 연결된 노드끼리 같은 "성분"으로 묶기 (union-find) — 서로 무관한 흐름끼리는
+  // 같은 레인 안에서도 다른 행(row)을 쓰게 만들어서 연결선이 겹치지 않게 하려는 목적
+  const nodeComponents = useMemo(() => {
+    const parent = {};
+    nodes.forEach((n) => { parent[n.id] = n.id; });
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+    const hasEdge = new Set();
+    edges.forEach((e) => {
+      if (parent[e.from] === undefined || parent[e.to] === undefined) return;
+      union(e.from, e.to);
+      hasEdge.add(e.from); hasEdge.add(e.to);
+    });
+    const comp = {};
+    nodes.forEach((n) => { comp[n.id] = hasEdge.has(n.id) ? find(n.id) : null; }); // 연결선이 하나도 없는 노드는 null(자유롭게 배치)
+    return comp;
+  }, [nodes, edges]);
+
   const laneLayout = useMemo(() => {
     const ROW_GAP = 14;
     let top = HEADER_HEIGHT;
@@ -240,21 +308,29 @@ function DateFlowchartTimeline() {
         .map((n) => {
           const isSingleDay = n.start === n.end;
           const isHalf = zoomKey === "day" && isSingleDay && (n.half === "am" || n.half === "pm");
+          const comp = nodeComponents[n.id] ?? null;
           if (isHalf) {
             const halfW = zoom.pxPerDay / 2;
             const x = xOf(n.start) + (n.half === "pm" ? halfW : 0);
             const w = Math.max(halfW - 10, 30);
-            return { n, x, w };
+            return { n, x, w, comp };
           }
           const dayBasedW = (diffDays(n.start, n.end) + 1) * zoom.pxPerDay - 18;
           const minW = zoom.pxPerDay >= 20 ? 46 : 14;
-          return { n, x: xOf(n.start), w: Math.max(dayBasedW, minW) };
+          return { n, x: xOf(n.start), w: Math.max(dayBasedW, minW), comp };
         })
         .sort((a, b) => a.x - b.x);
       const rowEnds = []; // 각 행에 마지막으로 배치된 노드의 오른쪽 끝 x
+      const rowComponent = []; // 각 행이 어느 연결 성분 전용으로 고정됐는지 (null이면 아직 미고정 = 자유노드만 사용 중)
       items.forEach((item) => {
-        let row = rowEnds.findIndex((end) => item.x >= end + ROW_GAP);
-        if (row === -1) { row = rowEnds.length; rowEnds.push(-Infinity); }
+        let row = -1;
+        for (let r = 0; r < rowEnds.length; r++) {
+          const rc = rowComponent[r];
+          const compatible = item.comp === null || rc === null || rc === item.comp;
+          if (compatible && item.x >= rowEnds[r] + ROW_GAP) { row = r; break; }
+        }
+        if (row === -1) { row = rowEnds.length; rowEnds.push(-Infinity); rowComponent.push(item.comp); }
+        else if (item.comp !== null && rowComponent[row] === null) { rowComponent[row] = item.comp; } // 실제 연결선이 있는 노드가 처음 그 행을 쓰면, 그 행은 그 성분 전용으로 고정
         rowEnds[row] = item.x + item.w;
         item.row = row;
       });
@@ -265,7 +341,7 @@ function DateFlowchartTimeline() {
       return entry;
     });
     return { lanes: lanes2, totalHeight: top - HEADER_HEIGHT };
-  }, [vNodes, visibleLaneNames.join(","), zoomKey, domainStart]);
+  }, [vNodes, visibleLaneNames.join(","), zoomKey, domainStart, nodeComponents]);
 
   const chartHeight = HEADER_HEIGHT + laneLayout.totalHeight;
 
@@ -522,7 +598,7 @@ function DateFlowchartTimeline() {
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-hidden">
+        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-visible">
           <svg ref={svgRef} width={totalWidth} height={chartHeight} style={{ display: "block", cursor: "grab", userSelect: "none", touchAction: "none" }}
             onClick={handleCanvasClick} onPointerDown={handleCanvasPointerDown} onPointerUp={handleCanvasPointerUp}
             onPointerMove={handleCanvasPointerMove} onPointerLeave={() => { if (!dragState.current.dragging) setHover(null); }}>
@@ -603,6 +679,14 @@ function DateFlowchartTimeline() {
               if (!p) return null;
               const st = (n.category && CATEGORY_STYLES[n.category]) || STATUS_STYLES[n.status] || STATUS_STYLES.pending;
               const fullTitle = `${n.label}${n.category ? " · " + CATEGORY_LABEL[n.category] : ""} (${n.start}${n.end !== n.start ? " ~ " + n.end : n.half === "am" ? " 오전" : n.half === "pm" ? " 오후" : ""})`;
+              const preview = dragPreview && dragPreview.nodeId === n.id ? dragPreview : null;
+              const groupProps = {
+                onClick: (e) => { e.stopPropagation(); openEdit(n); },
+                onPointerDown: (e) => handleNodePointerDown(e, n),
+                style: { cursor: preview ? "grabbing" : "grab" },
+                transform: preview ? `translate(${preview.dx},${preview.dy})` : undefined,
+                opacity: preview ? 0.85 : 1,
+              };
               if (n.type === "gate") {
                 const size = Math.min(40, Math.max(28, p.w * 0.7)); // 슬롯이 좁으면(오전/오후 등) 다이아몬드도 같이 줄임
                 const cx = p.x + p.w / 2, cy = p.y; // 슬롯 왼쪽 경계가 아니라 가운데에 오도록
@@ -610,7 +694,7 @@ function DateFlowchartTimeline() {
                 const clipId = "clip-" + n.id;
                 const gateFont = fitFontSize(n.label, size * 0.78, 10.5, 7);
                 return (
-                  <g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}>
+                  <g key={n.id} {...groupProps}>
                     <title>{fullTitle}</title>
                     <clipPath id={clipId}><rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} /></clipPath>
                     <polygon points={pts} fill="#1e293b" stroke="#5eead4" strokeWidth={1.4} />
@@ -621,7 +705,7 @@ function DateFlowchartTimeline() {
               const clipId = "clip-" + n.id;
               const titleFont = fitFontSize(n.label, p.w - 10, 11, 7);
               return (
-                <g key={n.id} onClick={(e) => { e.stopPropagation(); openEdit(n); }} style={{ cursor: "pointer" }}>
+                <g key={n.id} {...groupProps}>
                   <title>{fullTitle}</title>
                   <clipPath id={clipId}><rect x={p.x} y={p.y - 18} width={p.w} height={36} rx={7} /></clipPath>
                   <rect x={p.x} y={p.y - 18} width={p.w} height={36} rx={7} fill={st.fill} stroke={st.stroke} strokeWidth={1.3} />

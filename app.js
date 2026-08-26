@@ -660,8 +660,21 @@ function DateFlowchartTimeline() {
               let path, mx, my;
               if (horizontal && forward) {
                 const x1 = a.right, y1 = a.y, x2 = b.left, y2 = b.y;
-                const dx = Math.min(24, Math.max(6, (x2 - x1) / 2));
-                path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+                if (Math.abs(y2 - y1) < 1) {
+                  // 같은 행: 기존처럼 완만한 곡선
+                  const dx = Math.min(24, Math.max(6, (x2 - x1) / 2));
+                  path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+                } else {
+                  // 다른 행/레인으로 건너가는 연결: 대각선으로 그리면 중간에 있는 무관한 행의
+                  // 노드 위를 그냥 가로질러 지나가 버려서, 출발 직후 바로 꺾어 목적지 행 높이로
+                  // 옮긴 뒤 그 높이로만 쭉 가는 꺾은선(엘보) 형태로 그린다. 그 행은 이 흐름
+                  // 전용으로 고정돼 있으니 다른 LOT과 겹칠 일이 없다.
+                  const gap = Math.max(x2 - x1, 1);
+                  const turnX = x1 + Math.min(24, gap * 0.3);
+                  const down = y2 > y1;
+                  const r = Math.max(2, Math.min(8, Math.abs(y2 - y1) / 2, gap / 2 - 1));
+                  path = `M ${x1},${y1} L ${turnX - r},${y1} Q ${turnX},${y1} ${turnX},${y1 + (down ? r : -r)} L ${turnX},${y2 - (down ? r : -r)} Q ${turnX},${y2} ${turnX + r},${y2} L ${x2},${y2}`;
+                }
                 mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
               } else if (horizontal && !forward) {
                 // 되돌아가는(역방향) 연결: 아래로 살짝 루프를 그려서 정방향 화살표와 겹치지 않게 분리

@@ -42,6 +42,8 @@ const fitFontSize = (label, maxWidth, baseFontSize = 11, minFontSize = 7) => {
   if (estWidth <= maxWidth) return baseFontSize;
   return Math.max(minFontSize, baseFontSize * (maxWidth / estWidth));
 };
+// 여러 연결선이 한 지점(목적지)으로 모일 때, 꺾이는 위치를 살짝씩 어긋나게(계단식으로) 만들기 위한 안정적인 해시
+const hashStr = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
 
 // ---------- 초기 데이터 ----------
 const T = todayStr();
@@ -666,11 +668,13 @@ function DateFlowchartTimeline() {
                   path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
                 } else {
                   // 다른 행/레인으로 건너가는 연결: 대각선으로 그리면 중간에 있는 무관한 행의
-                  // 노드 위를 그냥 가로질러 지나가 버려서, 출발 직후 바로 꺾어 목적지 행 높이로
-                  // 옮긴 뒤 그 높이로만 쭉 가는 꺾은선(엘보) 형태로 그린다. 그 행은 이 흐름
-                  // 전용으로 고정돼 있으니 다른 LOT과 겹칠 일이 없다.
+                  // 노드 위를 그냥 가로질러 지나가 버려서, "도착점 근처"에서 꺾어 그 전까지는
+                  // 출발점 행 높이로만 쭉 가는 꺾은선(엘보) 형태로 그린다. 여러 흐름이 같은
+                  // 목적지 근처로 모일 때는 꺾이는 위치를 살짝씩 어긋나게(계단식) 만들어서
+                  // 꺾이는 지점끼리 겹쳐 헷갈리지 않게 한다.
                   const gap = Math.max(x2 - x1, 1);
-                  const turnX = x1 + Math.min(24, gap * 0.3);
+                  const stagger = (hashStr(e.id) % 5) * 10; // 0~40px 사이로 살짝씩 어긋나게
+                  const turnX = x2 - Math.min(28, gap * 0.3) - stagger;
                   const down = y2 > y1;
                   const r = Math.max(2, Math.min(8, Math.abs(y2 - y1) / 2, gap / 2 - 1));
                   path = `M ${x1},${y1} L ${turnX - r},${y1} Q ${turnX},${y1} ${turnX},${y1 + (down ? r : -r)} L ${turnX},${y2 - (down ? r : -r)} Q ${turnX},${y2} ${turnX + r},${y2} L ${x2},${y2}`;

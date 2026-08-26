@@ -376,6 +376,25 @@ function DateFlowchartTimeline() {
     return map;
   }, [laneLayout]);
 
+  // 한 노드로 여러 흐름(다른 행에서 오는 연결선)이 모이는 경우, 전부 정중앙 한 점으로
+  // 들어오면 마지막 구간이 완전히 겹쳐버린다. 그래서 목적지 노드로 들어오는 지점 자체를
+  // 노드 높이 안에서 순서대로 조금씩 위/아래로 어긋나게 배정한다.
+  const edgeEntryOffset = useMemo(() => {
+    const byTarget = {};
+    edges.forEach((e) => {
+      const a = nodePos[e.from], b = nodePos[e.to];
+      if (!a || !b || Math.abs(b.y - a.y) < 1) return; // 같은 행끼리는 어긋낼 필요 없음
+      (byTarget[e.to] = byTarget[e.to] || []).push(e.id);
+    });
+    const offset = {};
+    Object.values(byTarget).forEach((list) => {
+      list.sort();
+      const n = list.length;
+      list.forEach((id, idx) => { offset[id] = n > 1 ? idx - (n - 1) / 2 : 0; }); // 가운데 정렬로 위아래에 고르게 분산
+    });
+    return offset;
+  }, [edges, nodePos]);
+
   const openAdd = () => setForm(emptyForm(lanes[0]?.name || ""));
   const openEdit = (n) => {
     const links = edges.filter((e) => e.to === n.id).map((e) => ({ parentId: e.from, label: e.label, edgeId: e.id }));
@@ -661,8 +680,9 @@ function DateFlowchartTimeline() {
               const forward = ddx >= 0; // 시간상 앞으로 가는지(색/점선 구분용, 연결면 선택과는 별개)
               let path, mx, my;
               if (horizontal && forward) {
-                const x1 = a.right, y1 = a.y, x2 = b.left, y2 = b.y;
-                if (Math.abs(y2 - y1) < 1) {
+                const x1 = a.right, y1 = a.y;
+                let x2 = b.left, y2 = b.y;
+                if (Math.abs(b.y - a.y) < 1) {
                   // 같은 행: 기존처럼 완만한 곡선
                   const dx = Math.min(24, Math.max(6, (x2 - x1) / 2));
                   path = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
@@ -670,8 +690,12 @@ function DateFlowchartTimeline() {
                   // 다른 행/레인으로 건너가는 연결: 대각선으로 그리면 중간에 있는 무관한 행의
                   // 노드 위를 그냥 가로질러 지나가 버려서, "도착점 근처"에서 꺾어 그 전까지는
                   // 출발점 행 높이로만 쭉 가는 꺾은선(엘보) 형태로 그린다. 여러 흐름이 같은
-                  // 목적지 근처로 모일 때는 꺾이는 위치를 살짝씩 어긋나게(계단식) 만들어서
-                  // 꺾이는 지점끼리 겹쳐 헷갈리지 않게 한다.
+                  // 목적지로 모일 땐, 노드 높이 안에서 진입 지점 자체를 위아래로 어긋나게
+                  // 배정해서 마지막 구간까지 서로 겹치지 않게 한다.
+                  const half = Math.max((b.bottom - b.top) / 2 - 4, 3);
+                  const step = Math.min(6, half / 2);
+                  const off = (edgeEntryOffset[e.id] || 0) * step;
+                  y2 = Math.max(b.top + 3, Math.min(b.bottom - 3, b.y + off));
                   const gap = Math.max(x2 - x1, 1);
                   const stagger = (hashStr(e.id) % 5) * 10; // 0~40px 사이로 살짝씩 어긋나게
                   const turnX = x2 - Math.min(28, gap * 0.3) - stagger;

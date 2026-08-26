@@ -298,17 +298,9 @@ function DateFlowchartTimeline() {
     return comp;
   }, [nodes, edges]);
 
-  // 서로 다른 흐름(성분)을 색으로 구분 — 선이 겹치거나 교차해도 색으로 알아볼 수 있게
+  // 색은 "연결 성분" 기준이 아니라, 레인 안에서 배정된 행(row) 번호 기준으로 정한다.
+  // 같은 레인 안에서 겹쳐서 다른 줄에 놓인 것들이 서로 색이 다르게 보이도록 하려는 목적.
   const EDGE_PALETTE = ["#5eead4", "#fb923c", "#c084fc", "#60a5fa", "#f472b6", "#facc15", "#34d399", "#f87171", "#a3e635", "#818cf8"];
-  const componentColorMap = useMemo(() => {
-    const map = {};
-    let idx = 0;
-    nodes.forEach((n) => {
-      const c = nodeComponents[n.id];
-      if (c != null && !(c in map)) { map[c] = EDGE_PALETTE[idx % EDGE_PALETTE.length]; idx += 1; }
-    });
-    return map;
-  }, [nodes, nodeComponents]);
 
   const laneLayout = useMemo(() => {
     const ROW_GAP = 14;
@@ -355,6 +347,15 @@ function DateFlowchartTimeline() {
   }, [vNodes, visibleLaneNames.join(","), zoomKey, domainStart, nodeComponents]);
 
   const chartHeight = HEADER_HEIGHT + laneLayout.totalHeight;
+
+  // 레인 안에서 몇 번째 행(row)에 놓였는지에 따라 색을 배정 — 같은 레인 안에서 겹치는 줄들이 서로 구분되도록
+  const nodeRowColor = useMemo(() => {
+    const map = {};
+    laneLayout.lanes.forEach((lane) => {
+      lane.items.forEach(({ n, row }) => { map[n.id] = EDGE_PALETTE[row % EDGE_PALETTE.length]; });
+    });
+    return map;
+  }, [laneLayout]);
 
   const nodePos = useMemo(() => {
     const map = {};
@@ -676,7 +677,7 @@ function DateFlowchartTimeline() {
                 path = `M ${x1},${y1} C ${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`;
                 mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
               }
-              const edgeColor = componentColorMap[nodeComponents[e.from]] || "#5eead4";
+              const edgeColor = nodeRowColor[e.from] || "#5eead4";
               return (
                 <g key={e.id}>
                   <path d={path} fill="none" stroke="#0a0c10" strokeWidth={6} opacity={0.95} />

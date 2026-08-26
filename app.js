@@ -3,6 +3,7 @@ const { useState, useMemo, useRef, useEffect } = React;
 // ---------- 상수 ----------
 const LANE_HEIGHT = 92;
 const ROW_HEIGHT = 56; // 레인 안에서 겹치는 노드가 쌓일 때 한 행의 높이
+const HIDDEN_LANE_HEIGHT = 40; // 숨긴(👁 꺼진) 레인이 차지하는 축소된 높이 — 왼쪽 목록과 항상 동일해야 함
 const HEADER_HEIGHT = 52;
 const LABEL_COL_WIDTH = 190;
 
@@ -284,9 +285,10 @@ function DateFlowchartTimeline() {
   // 그 레인 안에서 아래쪽 행(row)으로 쌓는다. 레인 높이는 필요한 행 수만큼 늘어남.
   // 엣지로 연결된 노드끼리 같은 "성분"으로 묶기 (union-find) — 서로 무관한 흐름끼리는
   // 같은 레인 안에서도 다른 행(row)을 쓰게 만들어서 연결선이 겹치지 않게 하려는 목적.
-  // 단, 여러 흐름이 한 노드로 모이거나(병합) 한 노드에서 여러 흐름으로 갈라지는(분기) 지점은
-  // 묶지 않는다 — 안 그러면 "3번으로 둘 다 간다"는 이유만으로 서로 무관한 1번/2번까지
-  // 한 그룹으로 묶여서 같은 줄에 나란히 배치되고, 그게 "1→2→3" 한 흐름처럼 보이게 된다.
+  // 단, 한 노드로 여러 흐름이 모이는(병합) 경우 — 그중 첫 번째(주 흐름)는 계속 같은
+  // 성분으로 이어지고, 나머지 "추가로 합류하는" 입력들만 별도 성분으로 분리한다.
+  // (안 그러면 서로 무관한 형제 입력들까지 전부 한 성분으로 묶여 같은 줄에 나란히 배치되거나,
+  //  반대로 원래 하나로 쭉 이어지던 주 흐름까지 병합 지점마다 매번 끊겨버리는 문제가 생김)
   const nodeComponents = useMemo(() => {
     const indeg = {}, outdeg = {};
     nodes.forEach((n) => { indeg[n.id] = 0; outdeg[n.id] = 0; });
@@ -296,10 +298,14 @@ function DateFlowchartTimeline() {
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
     const hasEdge = new Set();
+    const outUsed = new Set(); // 이미 한 번 주 흐름을 내보낸 출발 노드 (추가 갈래는 더 이상 안 묶음)
+    const mergedInto = new Set(); // 이미 한 번 주 흐름을 받아들인 목적지 노드 (추가 입력은 더 이상 안 묶음)
     edges.forEach((e) => {
       if (parent[e.from] === undefined || parent[e.to] === undefined) return;
       hasEdge.add(e.from); hasEdge.add(e.to);
-      if (outdeg[e.from] <= 1 && indeg[e.to] <= 1) union(e.from, e.to); // 단순 1:1 연결일 때만 같은 성분으로 묶음
+      const fromOK = outdeg[e.from] <= 1 || !outUsed.has(e.from);
+      const toOK = indeg[e.to] <= 1 || !mergedInto.has(e.to);
+      if (fromOK && toOK) { union(e.from, e.to); outUsed.add(e.from); mergedInto.add(e.to); }
     });
     const comp = {};
     nodes.forEach((n) => { comp[n.id] = hasEdge.has(n.id) ? find(n.id) : null; }); // 연결선이 하나도 없는 노드는 null(자유롭게 배치)
@@ -313,7 +319,14 @@ function DateFlowchartTimeline() {
   const laneLayout = useMemo(() => {
     const ROW_GAP = 14;
     let top = HEADER_HEIGHT;
-    const lanes2 = visibleLanes.map((lane) => {
+    const lanes2 = lanes.map((lane) => {
+      if (!lane.visible) {
+        // 숨긴 레인도 왼쪽 목록과 높이를 맞추기 위해 작은 고정 높이만큼은 자리를 차지시킨다
+        // (안 그러면 오른쪽 타임라인만 그 레인 높이만큼 건너뛰어서 그 아래 레인들이 왼쪽과 어긋나 보임)
+        const entry = { name: lane.name, top, height: HIDDEN_LANE_HEIGHT, rowCount: 0, items: [] };
+        top += HIDDEN_LANE_HEIGHT;
+        return entry;
+      }
       const items = vNodes
         .filter((n) => n.lane === lane.name)
         .map((n) => {
@@ -352,7 +365,7 @@ function DateFlowchartTimeline() {
       return entry;
     });
     return { lanes: lanes2, totalHeight: top - HEADER_HEIGHT };
-  }, [vNodes, visibleLaneNames.join(","), zoomKey, domainStart, nodeComponents]);
+  }, [vNodes, lanes, zoomKey, domainStart, nodeComponents]);
 
   const chartHeight = HEADER_HEIGHT + laneLayout.totalHeight;
 
@@ -381,25 +394,6 @@ function DateFlowchartTimeline() {
     });
     return map;
   }, [laneLayout]);
-
-  // 한 노드로 여러 흐름(다른 행에서 오는 연결선)이 모이는 경우, 전부 정중앙 한 점으로
-  // 들어오면 마지막 구간이 완전히 겹쳐버린다. 그래서 목적지 노드로 들어오는 지점 자체를
-  // 노드 높이 안에서 순서대로 조금씩 위/아래로 어긋나게 배정한다.
-  const edgeEntryOffset = useMemo(() => {
-    const byTarget = {};
-    edges.forEach((e) => {
-      const a = nodePos[e.from], b = nodePos[e.to];
-      if (!a || !b || Math.abs(b.y - a.y) < 1) return; // 같은 행끼리는 어긋낼 필요 없음
-      (byTarget[e.to] = byTarget[e.to] || []).push(e.id);
-    });
-    const offset = {};
-    Object.values(byTarget).forEach((list) => {
-      list.sort();
-      const n = list.length;
-      list.forEach((id, idx) => { offset[id] = n > 1 ? idx - (n - 1) / 2 : 0; }); // 가운데 정렬로 위아래에 고르게 분산
-    });
-    return offset;
-  }, [edges, nodePos]);
 
   const openAdd = () => setForm(emptyForm(lanes[0]?.name || ""));
   const openEdit = (n) => {
@@ -600,9 +594,9 @@ function DateFlowchartTimeline() {
         <div style={{ width: LABEL_COL_WIDTH }} className="sticky left-0 z-10 flex-shrink-0 border-r border-zinc-800 bg-zinc-950">
           <div style={{ height: HEADER_HEIGHT }} className="border-b border-zinc-800 flex items-center px-3 text-[11px] text-zinc-500 uppercase tracking-wider">분류 / 레인</div>
           {lanes.map((lane, i) => {
-            const laneH = laneLayout.lanes.find((l) => l.name === lane.name)?.height || LANE_HEIGHT;
+            const laneH = laneLayout.lanes.find((l) => l.name === lane.name)?.height ?? (lane.visible ? LANE_HEIGHT : HIDDEN_LANE_HEIGHT);
             return (
-            <div key={lane.name} style={{ minHeight: laneH }} className={"border-b border-zinc-900 px-3 flex flex-col justify-center gap-1.5 " + (lane.visible ? "" : "opacity-40")}>
+            <div key={lane.name} style={{ height: laneH }} className={"border-b border-zinc-900 px-3 flex flex-col justify-center gap-1.5 overflow-hidden " + (lane.visible ? "" : "opacity-40")}>
               <div className="flex items-start justify-between gap-1">
                 {editingLane === lane.name ? (
                   <input
@@ -620,6 +614,7 @@ function DateFlowchartTimeline() {
                 )}
                 <button onClick={() => toggleLane(lane.name)} title="켜기/끄기" className="text-base leading-none flex-shrink-0">{lane.visible ? "👁" : "🚫"}</button>
               </div>
+              {lane.visible && (
               <div className="flex gap-2 items-center">
                 <button onClick={() => isolateLane(lane.name)} className="text-[10px] text-teal-400 hover:text-teal-300 border border-zinc-700 rounded px-1.5 py-0.5">
                   {lanes.every((l) => l.visible === (l.name === lane.name)) ? "전체보기" : "단독보기"}
@@ -628,6 +623,7 @@ function DateFlowchartTimeline() {
                 <button onClick={() => moveLane(i, 1)} className="text-zinc-500 hover:text-teal-400 text-xs">▼</button>
                 <button onClick={() => removeLane(lane.name)} className="text-zinc-500 hover:text-rose-400 text-xs">삭제</button>
               </div>
+              )}
             </div>
           );})}
           <div className="px-3 py-2 flex gap-1">
@@ -695,15 +691,11 @@ function DateFlowchartTimeline() {
                 } else {
                   // 다른 행/레인으로 건너가는 연결: 대각선으로 그리면 중간에 있는 무관한 행의
                   // 노드 위를 그냥 가로질러 지나가 버려서, "도착점 근처"에서 꺾어 그 전까지는
-                  // 출발점 행 높이로만 쭉 가는 꺾은선(엘보) 형태로 그린다. 여러 흐름이 같은
-                  // 목적지로 모일 땐, 노드 높이 안에서 진입 지점 자체를 위아래로 어긋나게
-                  // 배정해서 마지막 구간까지 서로 겹치지 않게 한다.
-                  const half = Math.max((b.bottom - b.top) / 2 - 4, 3);
-                  const step = Math.min(6, half / 2);
-                  const off = (edgeEntryOffset[e.id] || 0) * step;
-                  y2 = Math.max(b.top + 3, Math.min(b.bottom - 3, b.y + off));
+                  // 출발점 행 높이로만 쭉 가는 꺾은선(엘보) 형태로 그린다. 하나의 목적지로
+                  // 여러 흐름이 모일 땐 자연스럽게 합쳐져 보이는 게 오히려 보기 편하므로
+                  // 진입 지점을 억지로 갈라놓지 않는다.
                   const gap = Math.max(x2 - x1, 1);
-                  const stagger = (hashStr(e.id) % 5) * 10; // 0~40px 사이로 살짝씩 어긋나게
+                  const stagger = (hashStr(e.id) % 5) * 10; // 꺾이는 위치만 살짝씩 어긋나게 (자연스러운 합류 모양)
                   const turnX = x2 - Math.min(28, gap * 0.3) - stagger;
                   const down = y2 > y1;
                   const r = Math.max(2, Math.min(8, Math.abs(y2 - y1) / 2, gap / 2 - 1));

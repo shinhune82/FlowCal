@@ -298,6 +298,18 @@ function DateFlowchartTimeline() {
     return comp;
   }, [nodes, edges]);
 
+  // 서로 다른 흐름(성분)을 색으로 구분 — 선이 겹치거나 교차해도 색으로 알아볼 수 있게
+  const EDGE_PALETTE = ["#5eead4", "#fb923c", "#c084fc", "#60a5fa", "#f472b6", "#facc15", "#34d399", "#f87171", "#a3e635", "#818cf8"];
+  const componentColorMap = useMemo(() => {
+    const map = {};
+    let idx = 0;
+    nodes.forEach((n) => {
+      const c = nodeComponents[n.id];
+      if (c != null && !(c in map)) { map[c] = EDGE_PALETTE[idx % EDGE_PALETTE.length]; idx += 1; }
+    });
+    return map;
+  }, [nodes, nodeComponents]);
+
   const laneLayout = useMemo(() => {
     const ROW_GAP = 14;
     let top = HEADER_HEIGHT;
@@ -664,12 +676,13 @@ function DateFlowchartTimeline() {
                 path = `M ${x1},${y1} C ${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`;
                 mx = (x1 + x2) / 2; my = (y1 + y2) / 2;
               }
+              const edgeColor = componentColorMap[nodeComponents[e.from]] || "#5eead4";
               return (
                 <g key={e.id}>
                   <path d={path} fill="none" stroke="#0a0c10" strokeWidth={6} opacity={0.95} />
-                  <path d={path} fill="none" stroke={forward ? "#5eead4" : "#fb7185"} strokeWidth={2.2}
+                  <path d={path} fill="none" stroke={edgeColor} strokeWidth={2.2}
                     strokeDasharray={horizontal && !forward ? "5 4" : "none"} opacity={1} />
-                  {e.label && (<g><rect x={mx - e.label.length * 3.4 - 4} y={my - 17} width={e.label.length * 6.8 + 8} height={15} rx={3} fill="#0f1117" stroke="#27303f" /><text x={mx} y={my - 6} fontSize={10} fill={forward ? "#5eead4" : "#fb7185"} textAnchor="middle">{e.label}</text></g>)}
+                  {e.label && (<g><rect x={mx - e.label.length * 3.4 - 4} y={my - 17} width={e.label.length * 6.8 + 8} height={15} rx={3} fill="#0f1117" stroke="#27303f" /><text x={mx} y={my - 6} fontSize={10} fill={edgeColor} textAnchor="middle">{e.label}</text></g>)}
                 </g>
               );
             })}

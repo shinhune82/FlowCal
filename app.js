@@ -283,8 +283,14 @@ function DateFlowchartTimeline() {
   // 레인별 레이아웃: 날짜(x)는 절대 밀지 않고, 같은 날짜에 여러 개가 겹치면
   // 그 레인 안에서 아래쪽 행(row)으로 쌓는다. 레인 높이는 필요한 행 수만큼 늘어남.
   // 엣지로 연결된 노드끼리 같은 "성분"으로 묶기 (union-find) — 서로 무관한 흐름끼리는
-  // 같은 레인 안에서도 다른 행(row)을 쓰게 만들어서 연결선이 겹치지 않게 하려는 목적
+  // 같은 레인 안에서도 다른 행(row)을 쓰게 만들어서 연결선이 겹치지 않게 하려는 목적.
+  // 단, 여러 흐름이 한 노드로 모이거나(병합) 한 노드에서 여러 흐름으로 갈라지는(분기) 지점은
+  // 묶지 않는다 — 안 그러면 "3번으로 둘 다 간다"는 이유만으로 서로 무관한 1번/2번까지
+  // 한 그룹으로 묶여서 같은 줄에 나란히 배치되고, 그게 "1→2→3" 한 흐름처럼 보이게 된다.
   const nodeComponents = useMemo(() => {
+    const indeg = {}, outdeg = {};
+    nodes.forEach((n) => { indeg[n.id] = 0; outdeg[n.id] = 0; });
+    edges.forEach((e) => { if (outdeg[e.from] !== undefined) outdeg[e.from] += 1; if (indeg[e.to] !== undefined) indeg[e.to] += 1; });
     const parent = {};
     nodes.forEach((n) => { parent[n.id] = n.id; });
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
@@ -292,8 +298,8 @@ function DateFlowchartTimeline() {
     const hasEdge = new Set();
     edges.forEach((e) => {
       if (parent[e.from] === undefined || parent[e.to] === undefined) return;
-      union(e.from, e.to);
       hasEdge.add(e.from); hasEdge.add(e.to);
+      if (outdeg[e.from] <= 1 && indeg[e.to] <= 1) union(e.from, e.to); // 단순 1:1 연결일 때만 같은 성분으로 묶음
     });
     const comp = {};
     nodes.forEach((n) => { comp[n.id] = hasEdge.has(n.id) ? find(n.id) : null; }); // 연결선이 하나도 없는 노드는 null(자유롭게 배치)

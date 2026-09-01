@@ -21,13 +21,14 @@ const STATUS_STYLES = {
 };
 const STATUS_LABEL = { done: "완료", progress: "진행중", pending: "대기" };
 
-// 작업/단계에서 Bio/Kit/HPLC-MS 파트별 구분 색상 (상태색과 별개로, 카테고리를 지정하면 이 색이 박스 색이 됨)
+// 작업/단계에서 Bio/Kit/HPLC-MS/팀장업무 파트별 구분 색상 (상태색과 별개로, 카테고리를 지정하면 이 색이 박스 색이 됨)
 const CATEGORY_STYLES = {
   bio: { fill: "#4ade80", stroke: "#15803d", text: "#052e12" },
   kit: { fill: "#c084fc", stroke: "#7e22ce", text: "#2e1065" },
   hplc: { fill: "#60a5fa", stroke: "#1d4ed8", text: "#0b1d3a" },
+  team: { fill: "#f472b6", stroke: "#be185d", text: "#500724" },
 };
-const CATEGORY_LABEL = { bio: "Bio", kit: "Kit", hplc: "HPLC-MS" };
+const CATEGORY_LABEL = { bio: "Bio", kit: "Kit", hplc: "HPLC-MS", team: "팀장업무" };
 
 // ---------- 유틸 ----------
 const uid = (p = "n") => p + "_" + Math.random().toString(36).slice(2, 9);
@@ -90,6 +91,8 @@ function DateFlowchartTimeline() {
   const [nodes, setNodes] = useState(initialNodes);
   const [edges, setEdges] = useState(initialEdges);
   const [zoomKey, setZoomKey] = useState("day");
+  const [activeStatuses, setActiveStatuses] = useState(() => new Set(Object.keys(STATUS_LABEL)));
+  const [activeCategories, setActiveCategories] = useState(() => new Set([...Object.keys(CATEGORY_LABEL), "none"]));
   const [viewYear, setViewYear] = useState(Number(T.slice(0, 4)));
   const [form, setForm] = useState(null);
   const [newLane, setNewLane] = useState("");
@@ -127,7 +130,14 @@ function DateFlowchartTimeline() {
   const zoom = ZOOM_PRESETS[zoomKey];
   const visibleLanes = lanes.filter((l) => l.visible);
   const visibleLaneNames = visibleLanes.map((l) => l.name);
-  const vNodes = nodes.filter((n) => visibleLaneNames.includes(n.lane));
+  const vNodes = nodes.filter((n) => {
+    if (!visibleLaneNames.includes(n.lane)) return false;
+    if (n.type === "task") {
+      if (!activeStatuses.has(n.status)) return false;
+      if (!activeCategories.has(n.category || "none")) return false;
+    }
+    return true;
+  });
   const vNodeIds = new Set(vNodes.map((n) => n.id));
   const vEdges = edges.filter((e) => vNodeIds.has(e.from) && vNodeIds.has(e.to));
 
@@ -428,6 +438,14 @@ function DateFlowchartTimeline() {
     closeForm();
   };
 
+  // 연결 선택창의 노드 목록: 지금 고른 레인과 같은 레인의 노드를 먼저, 나머지는 뒤에 구분해서
+  const connectableNodes = (excludeId, laneName) => {
+    const rest = nodes.filter((n) => n.id !== excludeId);
+    const same = rest.filter((n) => n.lane === laneName);
+    const other = rest.filter((n) => n.lane !== laneName);
+    return { same, other };
+  };
+
   const addLink = () => setForm((f) => ({ ...f, links: [...f.links, { parentId: "", label: "" }] }));
   const updateLink = (i, key, val) => setForm((f) => ({ ...f, links: f.links.map((l, idx) => (idx === i ? { ...l, [key]: val } : l)) }));
   const removeLink = (i) => setForm((f) => ({ ...f, links: f.links.filter((_, idx) => idx !== i) }));
@@ -462,6 +480,27 @@ function DateFlowchartTimeline() {
     else commit({ lanes: lanes.map((l) => ({ ...l, visible: l.name === name })) });
   };
   const showAllLanes = () => commit({ lanes: lanes.map((l) => ({ ...l, visible: true })) });
+
+  const toggleStatusFilter = (key) => {
+    setActiveStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next.size === 0 ? new Set(Object.keys(STATUS_LABEL)) : next; // 전부 꺼지면 전체 보기로 복귀
+    });
+  };
+  const toggleCategoryFilter = (key) => {
+    setActiveCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next.size === 0 ? new Set([...Object.keys(CATEGORY_LABEL), "none"]) : next;
+    });
+  };
+  // 이 구분(카테고리)만 집중해서 보기 — 다시 누르면 전체 보기로 복귀
+  const isolateCategory = (key) => {
+    const all = new Set([...Object.keys(CATEGORY_LABEL), "none"]);
+    const isolated = activeCategories.size === 1 && activeCategories.has(key);
+    setActiveCategories(isolated ? all : new Set([key]));
+  };
 
   const [editingLane, setEditingLane] = useState(null);
   const [editingValue, setEditingValue] = useState("");
@@ -573,21 +612,36 @@ function DateFlowchartTimeline() {
         <button onClick={() => setImportOpen(true)} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 border border-zinc-700 px-3 py-1.5 rounded-md">⬆ 가져오기</button>
       </div>
       <div className="flex items-center gap-4 px-4 py-1.5 border-b border-zinc-800 bg-zinc-950/60 flex-wrap">
-        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">구분</span>
-        {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
-          <span key={k} className="flex items-center gap-1.5 text-xs text-zinc-300">
-            <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: CATEGORY_STYLES[k].fill, border: `1px solid ${CATEGORY_STYLES[k].stroke}` }} />
-            {label}
-          </span>
-        ))}
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">구분 (클릭: 켜기/끄기 · 더블클릭: 이것만 보기)</span>
+        {Object.entries(CATEGORY_LABEL).map(([k, label]) => {
+          const on = activeCategories.has(k);
+          return (
+            <button key={k} onClick={() => toggleCategoryFilter(k)} onDoubleClick={() => isolateCategory(k)}
+              className={"flex items-center gap-1.5 text-xs px-1.5 py-0.5 rounded transition-opacity " + (on ? "text-zinc-200" : "text-zinc-600 opacity-40")}>
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: CATEGORY_STYLES[k].fill, border: `1px solid ${CATEGORY_STYLES[k].stroke}` }} />
+              {label}
+            </button>
+          );
+        })}
+        <button onClick={() => toggleCategoryFilter("none")} onDoubleClick={() => isolateCategory("none")}
+          className={"flex items-center gap-1.5 text-xs px-1.5 py-0.5 rounded transition-opacity " + (activeCategories.has("none") ? "text-zinc-200" : "text-zinc-600 opacity-40")}>
+          <span className="inline-block w-3 h-3 rounded-sm border border-zinc-600 bg-zinc-700" />
+          미지정
+        </button>
         <span className="w-px h-3 bg-zinc-700 mx-1" />
-        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">상태 점</span>
-        {Object.entries(STATUS_LABEL).map(([k, label]) => (
-          <span key={k} className="flex items-center gap-1.5 text-xs text-zinc-300">
-            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_STYLES[k].fill }} />
-            {label}
-          </span>
-        ))}
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wider">상태 (클릭: 켜기/끄기)</span>
+        {Object.entries(STATUS_LABEL).map(([k, label]) => {
+          const on = activeStatuses.has(k);
+          return (
+            <button key={k} onClick={() => toggleStatusFilter(k)}
+              className={"flex items-center gap-1.5 text-xs px-1.5 py-0.5 rounded transition-opacity " + (on ? "text-zinc-200" : "text-zinc-600 opacity-40")}>
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_STYLES[k].fill }} />
+              {label}
+            </button>
+          );
+        })}
+        <button onClick={() => { setActiveStatuses(new Set(Object.keys(STATUS_LABEL))); setActiveCategories(new Set([...Object.keys(CATEGORY_LABEL), "none"])); }}
+          className="text-[10px] text-zinc-500 hover:text-teal-400 border border-zinc-700 rounded px-1.5 py-0.5 ml-1">필터 초기화</button>
       </div>
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto flex items-start">
@@ -829,7 +883,10 @@ function DateFlowchartTimeline() {
                 <div key={i} className="flex gap-1.5">
                   <select value={l.parentId} onChange={(e) => updateLink(i, "parentId", e.target.value)} className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs">
                     <option value="">선택...</option>
-                    {nodes.filter((n) => n.id !== form.id).map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+                    {(() => { const { same, other } = connectableNodes(form.id, form.lane); return (<>
+                      {same.length > 0 && <optgroup label={`같은 레인 (${form.lane})`}>{same.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}</optgroup>}
+                      {other.length > 0 && <optgroup label="다른 레인">{other.map((n) => <option key={n.id} value={n.id}>{n.label} · {n.lane}</option>)}</optgroup>}
+                    </>); })()}
                   </select>
                   <input value={l.label} onChange={(e) => updateLink(i, "label", e.target.value)} placeholder="조건 라벨(선택)" className="w-24 flex-shrink-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs" />
                   <button onClick={() => removeLink(i)} className="text-zinc-500 hover:text-rose-400">✕</button>
@@ -844,7 +901,10 @@ function DateFlowchartTimeline() {
                 <div key={i} className="flex gap-1.5">
                   <select value={l.childId} onChange={(e) => updateForwardLink(i, "childId", e.target.value)} className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs">
                     <option value="">선택...</option>
-                    {nodes.filter((n) => n.id !== form.id).map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+                    {(() => { const { same, other } = connectableNodes(form.id, form.lane); return (<>
+                      {same.length > 0 && <optgroup label={`같은 레인 (${form.lane})`}>{same.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}</optgroup>}
+                      {other.length > 0 && <optgroup label="다른 레인">{other.map((n) => <option key={n.id} value={n.id}>{n.label} · {n.lane}</option>)}</optgroup>}
+                    </>); })()}
                   </select>
                   <input value={l.label} onChange={(e) => updateForwardLink(i, "label", e.target.value)} placeholder="조건 라벨(선택)" className="w-24 flex-shrink-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs" />
                   <button onClick={() => removeForwardLink(i)} className="text-zinc-500 hover:text-rose-400">✕</button>
